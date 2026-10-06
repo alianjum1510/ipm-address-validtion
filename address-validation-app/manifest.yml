@@ -1,0 +1,24 @@
+app_id: 11146954
+version: 1.0.0
+
+features:
+  - id: address_enrichment
+    type: integration
+    name: Address Enrichment
+    trigger:
+      type: column_value_change
+    action:
+      type: server_side
+      entry_point: index.js
+      function_name: action
+      timeout_seconds: 30
+      retry:
+        enabled: true
+        max_attempts: 3
+
+permissions:
+  scopes:
+    - boards:read
+    - boards:write
+    - items:read
+    - items:write
