@@ -1,0 +1,9 @@
+.env
+node_modules
+npm-debug.log
+test
+prev_version
+here.py
+raw_responses
+*.csv
+.DS_Store

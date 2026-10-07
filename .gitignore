@@ -1,0 +1,9 @@
+.env
+node_modules/
+.DS_Store
+
+# here.py output
+raw_responses/
+results_here.csv
+results_postcode_service.csv
+fill_summary.csv

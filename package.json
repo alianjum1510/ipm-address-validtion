@@ -1,17 +1,13 @@
 {
-  "name": "address-validator",
+  "name": "here-address-app",
   "version": "1.0.0",
+  "description": "monday automation: fills address columns from HERE Geocoding",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js",
+    "test": "node --test test/"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "dependencies": {
-    "axios": "^1.15.0",
-    "body-parser": "^2.2.2",
-    "express": "^5.2.1"
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

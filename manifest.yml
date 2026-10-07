@@ -1,0 +1,23 @@
+# app_id: create a new app in the monday Developer Center and put its ID here.
+app_id: REPLACE_WITH_NEW_APP_ID
+version: 1.0.0
+
+features:
+  - id: here_address_enrichment
+    type: integration
+    name: HERE Address Enrichment
+    trigger:
+      type: column_value_change
+    action:
+      type: server_side
+      entry_point: index.js
+      function_name: action
+      timeout_seconds: 30
+      retry:
+        enabled: true
+        max_attempts: 3
+
+permissions:
+  scopes:
+    - boards:read
+    - boards:write
