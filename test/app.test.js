@@ -5,6 +5,7 @@ const assert = require("node:assert");
 
 process.env.MONDAY_API_TOKEN = "test-token";
 process.env.HERE_API_KEY = "test-key";
+process.env.COLUMN_LOCATION_ID = "location_original_board"; // set on monday for the original board
 
 const app = require("../index");
 const here = require("../here");
@@ -32,12 +33,13 @@ let item;
 let mutations;
 let hereQueries;
 
-function newItem(values) {
+function newItem(values, boardId = BOARD_ID) {
   item = {
     id: "111",
     name: "Test",
-    board: { id: BOARD_ID },
-    column_values: Object.values(C).filter(Boolean).map(id => ({ id, text: values[id] || "", value: null, type: "text" }))
+    board: { id: boardId },
+    column_values: Object.values(BOARDS[boardId].columns).filter(Boolean)
+      .map(id => ({ id, text: values[id] || "", value: null, type: "text" }))
   };
   mutations = [];
   hereQueries = [];
@@ -206,4 +208,105 @@ test("no column ID in the event (item created) → uses Full Address when the fi
   const r = await app.action({ event: { pulseId: 111, boardId: Number(BOARD_ID) } }, {});
   assert.strictEqual(r.mode, "address");
   assert.strictEqual(text(C.postcode), "51381");
+});
+
+// ---------- monday action block (what the live app receives) ----------
+// The block only sends boardId + itemId — no column ID — so the mode comes from
+// the URL the block calls: /action/address, /action/fields, or /action (auto).
+
+const blockPayload = (boardId = BOARD_ID) => ({
+  payload: {
+    blockKind: "action",
+    inboundFieldValues: { boardId: Number(boardId), itemId: Number(item.id) },
+    inputFields: { boardId: Number(boardId), itemId: Number(item.id) },
+    recipeId: 1, integrationId: 2
+  },
+  runtimeMetadata: { actionUuid: "x" }
+});
+
+test("modeFromPath maps the block URLs", () => {
+  assert.strictEqual(app.modeFromPath("/action/address"), "address");
+  assert.strictEqual(app.modeFromPath("/action/fields/"), "fields");
+  assert.strictEqual(app.modeFromPath("/action"), undefined);
+  assert.strictEqual(app.modeFromPath("/"), undefined);
+});
+
+test("block → /action/address fills everything; the follow-up /action/fields echo is skipped", async () => {
+  newItem({ [C.full_address]: "Borsigstraße 15, 51381 Leverkusen, Deutschland" });
+  const r1 = await app.action({ mode: "address" }, blockPayload());
+  assert.strictEqual(r1.mode, "address");
+  assert.strictEqual(text(C.postcode), "51381");
+
+  // monday fires the Adresszeile 1 and Postcode automations for the app's own writes
+  const r2 = await app.action({ mode: "fields" }, blockPayload());
+  const r3 = await app.action({ mode: "fields" }, blockPayload());
+  assert.strictEqual(r2.skipped, true);
+  assert.strictEqual(r3.skipped, true);
+  assert.strictEqual(hereQueries.length, 1);
+});
+
+test("block → user edits Postcode after population → /action/fields runs", async () => {
+  newItem({ [C.full_address]: "Borsigstraße 15, 51381 Leverkusen, Deutschland" });
+  await app.action({ mode: "address" }, blockPayload());
+
+  item.column_values.find(c => c.id === C.postcode).text = "99999"; // user edit
+  const r = await app.action({ mode: "fields" }, blockPayload());
+  assert.strictEqual(r.mode, "fields");
+  assert.match(r.reason, /Postcode mismatch/);
+  assert.strictEqual(text(C.status), "Stuck");
+});
+
+test("block → user re-enters Full Address after population → /action/address re-fills", async () => {
+  newItem({ [C.full_address]: "asdfgh qwerty" });
+  await app.action({ mode: "address" }, blockPayload()); // Stuck, no match
+
+  item.column_values.find(c => c.id === C.full_address).text = "Borsigstraße 15, 51381 Leverkusen, Deutschland";
+  const r = await app.action({ mode: "address" }, blockPayload());
+  assert.strictEqual(r.mode, "address");
+  assert.strictEqual(r.isComplete, true);
+  assert.strictEqual(text(C.address_line_1), "Borsigstraße 15");
+});
+
+test("block → existing /action URL (auto): fields when both filled, else Full Address", async () => {
+  newItem({ [C.address_line_1]: "Borsigstraße 15", [C.postcode]: "51381", [C.full_address]: "x" });
+  assert.strictEqual((await app.action({}, blockPayload())).mode, "fields");
+
+  newItem({ [C.full_address]: "Borsigstraße 15, 51381 Leverkusen, Deutschland" });
+  assert.strictEqual((await app.action({}, blockPayload())).mode, "address");
+});
+
+test("original board 5063711037 writes the location column from COLUMN_LOCATION_ID", async () => {
+  const O = BOARDS["5063711037"].columns;
+  assert.strictEqual(O.location, "location_original_board");
+
+  newItem({ [O.full_address]: "Borsigstraße 15, 51381 Leverkusen, Deutschland" }, "5063711037");
+  const r = await app.action({ mode: "address" }, blockPayload("5063711037"));
+  assert.strictEqual(r.isComplete, true);
+  assert.ok(O.location in mutations[0]);
+  assert.deepStrictEqual(mutations[0][O.status], { label: "Done" });
+});
+
+test("HTTP: POST /action/address and /action/fields route to the right mode", async () => {
+  const http = require("node:http");
+  await new Promise(resolve => app.server.listen(0, resolve));
+  const { port } = app.server.address();
+  const post = (path, body) => new Promise((resolve, reject) => {
+    const req = http.request({ port, path, method: "POST", headers: { "Content-Type": "application/json" } }, res => {
+      let data = "";
+      res.on("data", c => { data += c; });
+      res.on("end", () => resolve(JSON.parse(data)));
+    });
+    req.on("error", reject);
+    req.end(JSON.stringify(body));
+  });
+
+  try {
+    newItem({ [C.full_address]: "Borsigstraße 15, 51381 Leverkusen, Deutschland" });
+    assert.strictEqual((await post("/action/address", blockPayload())).mode, "address");
+
+    item.column_values.find(c => c.id === C.address_line_1).text = "Borsigstr. 15"; // user edit
+    assert.strictEqual((await post("/action/fields", blockPayload())).mode, "fields");
+  } finally {
+    app.server.close();
+  }
 });

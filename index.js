@@ -51,31 +51,37 @@ function loadLocalEnv() {
 
 // ---------- loop guard ----------
 // The app writes to trigger columns (mode "address" writes Address Line 1 and
-// Postcode; mode "fields" writes Full Address), and monday fires the trigger again
-// for those writes. We remember what we wrote and ignore the echo. Writes are also
-// diff-only, so even if this memory is lost (restart, second instance) the echo
-// run finds nothing to change and the chain stops.
+// Postcode; mode "fields" writes Full Address), and monday fires the automation
+// again for those writes. monday's action block doesn't say which column changed,
+// so after each write we remember the item's trigger-column values and ignore an
+// event when none of them has changed since. Writes are also diff-only, so even if
+// this memory is lost (restart, second instance) the echo run finds nothing to
+// change and the chain stops.
 const SELF_WRITE_TTL_MS = 2 * 60 * 1000;
-const recentWrites = new Map(); // `${itemId}:${columnId}` -> { value, at }
+const recentWrites = new Map(); // itemId -> { values: { columnId: value }, at }
 
-function rememberWrites(itemId, updates) {
-  const now = Date.now();
-  for (const [columnId, value] of Object.entries(updates)) {
-    if (ALL_TRIGGER_IDS.includes(columnId) && typeof value === "string") {
-      recentWrites.set(`${itemId}:${columnId}`, { value, at: now });
-    }
-  }
+function triggerColumns(cols) {
+  return [cols.full_address, cols.address_line_1, cols.postcode].filter(Boolean);
 }
 
-function isOwnWrite(itemId, columnId, currentValue) {
-  const key = `${itemId}:${columnId}`;
-  const entry = recentWrites.get(key);
+function rememberWrites(item, cols, updates) {
+  const values = {};
+  for (const columnId of triggerColumns(cols)) {
+    values[columnId] = typeof updates[columnId] === "string"
+      ? updates[columnId]
+      : getColumnValue(item.column_values, columnId);
+  }
+  recentWrites.set(String(item.id), { values, at: Date.now() });
+}
+
+function isEcho(item, cols) {
+  const entry = recentWrites.get(String(item.id));
   if (!entry) return false;
   if (Date.now() - entry.at > SELF_WRITE_TTL_MS) {
-    recentWrites.delete(key);
+    recentWrites.delete(String(item.id));
     return false;
   }
-  return entry.value === currentValue;
+  return triggerColumns(cols).every(id => entry.values[id] === getColumnValue(item.column_values, id));
 }
 
 // ---------- helpers ----------
@@ -95,12 +101,15 @@ function composeFullAddress(addr) {
 }
 
 // Decide which mode this event is. Returns null to skip.
-function resolveMode(changedIds, item, cols) {
+// forcedMode comes from the URL the automation block calls (/action/address or
+// /action/fields), since monday's action block payload has no column ID.
+function resolveMode(changedIds, item, cols, forcedMode) {
+  if (forcedMode) return forcedMode;
   if (changedIds.includes(cols.full_address)) return "address";
   if (changedIds.includes(cols.address_line_1) || changedIds.includes(cols.postcode)) return "fields";
   if (changedIds.length > 0) return null; // a trigger column, but not on this item's board
 
-  // No column ID in the event (e.g. an "item created" recipe): go by what's filled.
+  // No column ID and no mode in the URL (the existing /action block): go by what's filled.
   const hasFields = getColumnValue(item.column_values, cols.address_line_1) &&
     getColumnValue(item.column_values, cols.postcode);
   if (hasFields) return "fields";
@@ -134,16 +143,16 @@ function buildUpdates(item, board, addr, fieldKeys, isComplete) {
   return updates;
 }
 
-async function writeUpdates(item, boardId, updates, token) {
+async function writeUpdates(item, boardId, board, updates, token) {
   if (Object.keys(updates).length === 0) return [];
-  rememberWrites(item.id, updates); // before the write: monday may fire the echo before we get the response
+  rememberWrites(item, board.columns, updates); // before the write: monday may fire the echo before we get the response
   await updateItem(boardId, item.id, updates, token);
   return Object.keys(updates);
 }
 
 async function markStuck(item, boardId, board, reason, mode, token) {
   console.log(`Item ${item.id} [${mode}]: Stuck — ${reason}`);
-  const written = await writeUpdates(item, boardId, buildUpdates(item, board, {}, [], false), token);
+  const written = await writeUpdates(item, boardId, board, buildUpdates(item, board, {}, [], false), token);
   return { itemId: String(item.id), mode, isComplete: false, reason, written };
 }
 
@@ -151,7 +160,7 @@ async function finish(item, boardId, board, addr, fieldKeys, mode, token) {
   const missing = getMissingFields(addr);
   const isComplete = missing.length === 0;
   const updates = buildUpdates(item, board, addr, fieldKeys, isComplete);
-  const written = await writeUpdates(item, boardId, updates, token);
+  const written = await writeUpdates(item, boardId, board, updates, token);
 
   console.log(
     `Item ${item.id} [${mode}]: ${isComplete ? "Complete" : `Stuck — missing: ${missing.join(", ")}`} ` +
@@ -239,14 +248,13 @@ async function action(argA = {}, argB = {}) {
   const boardId = normalizeId(item.board?.id || rawBoardId);
   const board = getBoardConfig(boardId);
 
-  const mode = resolveMode(changed, item, board.columns);
+  const mode = resolveMode(changed, item, board.columns, resolved.context?.mode);
   if (!mode) {
     return { success: true, skipped: true, reason: `Column ${changed.join(", ")} does not belong to board ${boardId}.` };
   }
 
-  const echo = changed.find(id => isOwnWrite(item.id, id, getColumnValue(item.column_values, id)));
-  if (echo) {
-    console.log(`Item ${item.id}: ignoring change to ${echo} — written by this app.`);
+  if (isEcho(item, board.columns)) {
+    console.log(`Item ${item.id} [${mode}]: ignoring — no address input changed since this app's last write.`);
     return { success: true, skipped: true, reason: "Change was written by this app." };
   }
 
@@ -276,6 +284,17 @@ function sendJson(res, code, data) {
   res.end(JSON.stringify(data));
 }
 
+// Each automation block calls its own URL:
+//   .../action/address  → Full Address mode
+//   .../action/fields   → Address Line 1 / Postcode mode
+//   anything else       → auto (the existing ".../action" block)
+function modeFromPath(url) {
+  const pathname = String(url || "").split("?")[0].replace(/\/+$/, "");
+  if (pathname.endsWith("/address")) return "address";
+  if (pathname.endsWith("/fields")) return "fields";
+  return undefined;
+}
+
 const server = http.createServer(async (req, res) => {
   // Health check on any GET — monday Code probes the root path.
   if (req.method === "GET") {
@@ -292,7 +311,8 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 200, { challenge: payload.challenge });
         return;
       }
-      const context = { token: req.headers.authorization || undefined };
+      const context = { token: req.headers.authorization || undefined, mode: modeFromPath(req.url) };
+      console.log(`Incoming POST ${req.url} (mode: ${context.mode || "auto"})`);
       sendJson(res, 200, await action(context, payload));
     } catch (err) {
       console.error("Error:", err.message);
@@ -313,6 +333,8 @@ module.exports = {
   processFromAddress,
   processFromFields,
   resolveMode,
+  modeFromPath,
   composeFullAddress,
+  server,
   _recentWrites: recentWrites
 };

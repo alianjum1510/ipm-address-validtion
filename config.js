@@ -1,22 +1,26 @@
 // Per-board column IDs and status labels. monday regenerates column IDs when a
 // board is duplicated, so each board needs its own mapping.
 const BOARDS = {
-  // Address Master Board (original)
+  // Address Master Board (original). IDs can be overridden with the same COLUMN_*
+  // env vars the previous version used; the live app sets COLUMN_LOCATION_ID.
   "5063711037": {
     columns: {
-      full_address:   "text_mkw9pw3m",    // Vollständige Adresse (legal)  — TRIGGER (mode "address")
-      address_line_1: "text_mkw9v8an",    // Adresszeile 1 (Legal)         — TRIGGER (mode "fields")
-      postcode:       "text_mkxqtbr0",    // Postleitzahl (legal)          — TRIGGER (mode "fields")
-      city:           "text_mkyw1a7a",    // Ort
-      district:       "text_mkx4mpvc",    // Landkreis / Kreis (legal)
-      state:          "text_mkx5m5c3",    // Bundesland (legal)
-      country:        "text_mkywm44h",    // Land
-      latitude:       "numeric_mkw9x7h5", // Breitengrad (legal)
-      longitude:      "numeric_mkw94cck", // Längengrad (legal)
-      location:       undefined,          // no location column on this board
-      status:         "color_mm0851fj"    // Match Zipcode
+      full_address:   process.env.COLUMN_FULL_ADDRESS_ID   || "text_mkw9pw3m",    // Vollständige Adresse (legal)
+      address_line_1: process.env.COLUMN_ADDRESS_LINE_1_ID || "text_mkw9v8an",    // Adresszeile 1 (Legal)
+      postcode:       process.env.COLUMN_POSTCODE_ID       || "text_mkxqtbr0",    // Postleitzahl (legal)
+      city:           process.env.COLUMN_CITY_ID           || "text_mkyw1a7a",    // Ort
+      district:       process.env.COLUMN_DISTRICT_ID       || "text_mkx4mpvc",    // Landkreis / Kreis (legal)
+      state:          process.env.COLUMN_STATE_ID          || "text_mkx5m5c3",    // Bundesland (legal)
+      country:        process.env.COLUMN_COUNTRY_ID        || "text_mkywm44h",    // Land
+      latitude:       process.env.COLUMN_LATITUDE_ID       || "numeric_mkw9x7h5", // Breitengrad (legal)
+      longitude:      process.env.COLUMN_LONGITUDE_ID      || "numeric_mkw94cck", // Längengrad (legal)
+      location:       process.env.COLUMN_LOCATION_ID       || undefined,          // Location (set via env on monday)
+      status:         process.env.COLUMN_STATUS_ID         || "color_mm0851fj"    // Match Zipcode
     },
-    labels: { done: "Done", stuck: "Stuck" }
+    labels: {
+      done:  process.env.DONE_STATUS_LABEL  || "Done",
+      stuck: process.env.STUCK_STATUS_LABEL || "Stuck"
+    }
   },
   // Address Master Board (replica)
   "5090777446": {
