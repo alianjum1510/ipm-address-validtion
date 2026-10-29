@@ -10,7 +10,7 @@ The HERE query and field mapping are ported from [`here.py`](here.py).
 | `index.js`, `here.js`, `monday.js`, `payload.js`, `config.js` | The HERE app (deployed) |
 | `test/` | Tests with monday and HERE stubbed |
 | `here.py` | Standalone script comparing HERE vs Postcode Service on sample addresses |
-| `prev_version/` | Previous Google Maps + OpenAI validator, kept for reference (not deployed). Also tagged `v1-google-openai`. |
+| `prev_version_Google_API.zip` | Previous Google Maps + OpenAI validator, zipped for reference (not deployed). Also tagged `v1-google-openai`. |
 
 ## Trigger points
 

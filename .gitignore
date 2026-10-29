@@ -2,6 +2,7 @@
 node_modules/
 .DS_Store
 
+prev_version_Google_API.zip
 # here.py output
 raw_responses/
 results_here.csv
