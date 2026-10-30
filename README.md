@@ -7,7 +7,8 @@ The HERE query and field mapping are ported from [`here.py`](here.py).
 
 | Path | |
 |---|---|
-| `index.js`, `here.js`, `monday.js`, `payload.js`, `config.js` | The HERE app (deployed) |
+| `main.py`, `here_api.py`, `monday.py`, `payload.py`, `config.py` | The HERE app (Python, deployed) |
+| `.mondaycoderc`, `Procfile`, `requirements.txt` | monday code runtime (Python 3.12), start command, dependencies (none) |
 | `test/` | Tests with monday and HERE stubbed |
 | `here.py` | Standalone script comparing HERE vs Postcode Service on sample addresses |
 | `prev_version_Google_API.zip` | Previous Google Maps + OpenAI validator, zipped for reference (not deployed). Also tagged `v1-google-openai`. |
@@ -25,7 +26,7 @@ each block calls its own URL and the URL picks the mode:
 
 If a payload does include a column ID (webhooks), that decides the mode instead.
 
-Column IDs per board are in [`config.js`](config.js) (boards `5063711037` and `5090777446`).
+Column IDs per board are in [`config.py`](config.py) (boards `5063711037` and `5090777446`).
 
 ## How HERE is called (same as here.py)
 
@@ -66,14 +67,14 @@ writes Full Address), which fires the automations again. Two guards stop that:
 | `PORT` | no | Defaults to `8080` |
 | `DEFAULT_BOARD_ID` | no | Column map used for unknown boards, defaults to `5063711037` |
 
-No npm dependencies — Node 18+ built-in `fetch` is used.
+No third-party packages — only the Python standard library (3.9+ locally, 3.12 on monday code).
 
 ## Run & test locally
 
 ```bash
-cp .env.example .env    # fill in the keys
-npm start               # GET / → OK
-npm test                # stubbed monday + HERE, no keys needed
+cp .env.example .env                       # fill in the keys
+python3 main.py                            # GET / → OK
+python3 -m unittest discover -s test -v    # stubbed monday + HERE, no keys needed
 ```
 
 ```bash
@@ -85,6 +86,10 @@ curl -X POST http://localhost:8080/action/address -H "Content-Type: application/
 
 Current state: v1 deprecated, **v2 live**, v3 draft. Build the HERE version in a draft and
 promote only after testing.
+
+**Deploy** — from this folder, `mapps code:push` (select the draft version). `.mondaycoderc` tells
+monday code to build a Python 3.12 container; the `Procfile` starts `python3 main.py`, which listens
+on monday's `PORT` and answers the health check on `GET /`. Files in `.mappsignore` are not uploaded.
 
 **Server-side code → Environment variables** — add `HERE_API_KEY`. Keep `MONDAY_API_TOKEN` and
 `COLUMN_LOCATION_ID`. Do not delete `OPENAI_API_KEY` / `GOOGLE_MAPS_API_KEY` while v2 is live.

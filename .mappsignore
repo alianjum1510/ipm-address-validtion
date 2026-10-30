@@ -1,9 +1,12 @@
 .env
-node_modules
-npm-debug.log
+.venv
+venv
+__pycache__
+*.pyc
 test
-prev_version_Google_API.zip
 here.py
 raw_responses
 *.csv
+prev_version_Google_API.zip
+code.tar.gz
 .DS_Store

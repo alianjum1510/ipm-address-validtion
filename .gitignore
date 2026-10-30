@@ -8,3 +8,7 @@ raw_responses/
 results_here.csv
 results_postcode_service.csv
 fill_summary.csv
+
+# Python
+__pycache__/
+*.pyc
